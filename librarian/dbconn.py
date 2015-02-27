@@ -18,6 +18,15 @@ Schema:
 """
 
 import MySQLdb, datetime
+Schema = {
+'Engagements': ['id', 'name', 'date_started', 'owner', 'comments'], 
+
+'IncomingData': ['id', 'project', 'name', 'version', 'timestamp', 
+      'urls', 'checksums', 'metadata_url', 'comments', 'user', 'hostname'],
+
+'OutgoingData': ['id', 'project', 'name', 'version', 'timestamp', 
+      'urls', 'checksums', 'metadata_url', 'comments', 'user', 'hostname']
+}
 
 class DBConn:
   """Represents a live database conn with Librarian-specific operators."""
@@ -39,7 +48,7 @@ class DBConn:
     try:
       for _ in xrange(c.execute( '''select name from Engagements''')):
         yield c.fetchone()[0]
-    except:
+    except Exception:
       raise Exception('Database not available')
     c.close()
     
@@ -69,12 +78,15 @@ class DBConn:
     ''' Creates a new project in the database. This function should be called
         after appropriate space has been allocated on the S3 bucket
     '''
-    if project in self.ls():
+    if project in self.projectLs():
       raise Exception('Project already exists!')
     c = self.db.cursor()
     date = datetime.date.today()
     owner = self.user
-    c.execute('''insert into Engagements values (%s, %s, %s, %s)''',
-            (project, date, owner, comments))
+    relation = 'Engagements(%s, %s, %s, %s)' % tuple(Schema['Engagements'][1:])
+    c.execute('insert into ' + relation + ' values (%s, %s, %s, %s)',
+                (project, date, owner, comments))
+    self.db.commit()
     c.close()
     
+

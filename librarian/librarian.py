@@ -12,7 +12,7 @@ Freebase dumps.
 It should NOT be used to hold temporary or working files.
 """
 
-import argparse, boto, json, os.path, dbconn
+import argparse, boto, json, os.path, dbconn, storage_s3, datetime
 
 ##
 # GLOBALS
@@ -64,27 +64,42 @@ def addCredentials(credentialName, **credential):
   global configDict
   configDict["credentials"][credentialName] = credential
   saveConfig()
-
-
+  
+#TODO - should be removed
 def checkS3():
   """Ensure we have valid S3 access"""
   loadConfig()
 
 
-def checkMetadata():
-  """Ensure we have valid access to the Librarian metadata."""
+def get_db_access():
+  """ get access to the Librarian database """
   loadConfig()
-  global dbconn
   c = configDict["credentials"]["mysql"]
-  dbconn = dbconn.DBConn(c["user"], c["password"], c["host"], c["port"])
+  db = dbconn.DBConn(c["user"], c["password"], c["host"], c["port"])
+  return db
 
+def get_s3_access():
+  """ get access to the Librarian s3 storage """
+  loadConfig()
+  aws_cred = configDict["credentials"]["aws"]
+  storage = storage_s3.StorageS3(**aws_cred)
+  return storage
 
-def put(fname, project, comment):
+# TODO Modify
+def put(localpath, project, name, comment):
   """Check a file into Librarian"""
-  checkMetadata()
-  print "Put a file called", fname, "into project", project, "with comment", comment
-
-
+  db = get_db_access()
+  s3 = get_s3_access()
+  if not os.path.exists(localpath):
+    raise Exception('Invalid local path specified')
+  if projectname not in db.projectLs():
+    print "The given project doesn't exist. Please create it first."
+  timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
+  urls, checksums = s3.upload(localpath, project, name, timestamp)
+  
+  
+  
+# TODO Implement
 def get(fname, project):
   """Get a file from Librarian"""
   checkMetadata()  
@@ -93,20 +108,30 @@ def get(fname, project):
 
 def projectLs():
   """List all Librarian projects"""
-  checkMetadata()  
+  db = get_db_access()  
   print "List of all known projects:"
-  for name in dbconn.projectLs():
+  for name in db.projectLs():
     print name
 
 
 def ls(projectname):
   """List all Librarian files for a single project"""
-  checkMetadata()  
+  db = get_db_access()
+  if projectname not in db.projectLs():
+    print "The given project doesn't exist"
   print "List of all datasets in a project named", projectname
-  for name, version, urls in dbconn.ls(projectname):
+  for name, version, urls in db.ls(projectname):
     print name, version, urls
-
-
+    
+def create(projectname, comment):
+  """List all Librarian files for a single project"""
+  db = get_db_access()
+  if projectname in db.projectLs():
+    print "The given project already exists"
+  elif comment is None:
+    db.createProject(projectname)
+  else:
+    db.createProject(projectname, comment)
 #
 # main()
 #
@@ -115,7 +140,8 @@ def main():
 
   # Setup cmdline parsing
   parser = argparse.ArgumentParser(description="Librarian stores data")
-  parser.add_argument("--put", nargs=3, metavar=("filename", "project", "comment"), help="Puts a <filename> into a <project> with a <comment>")
+  parser.add_argument("--create", nargs=2, metavar=("project", "comment"), help="Create a new <project> and add a <comment>")
+  parser.add_argument("--put", nargs=3, metavar=("path", "project", "comment"), help="Puts contents of <path> into a <project> with a <comment>")
   parser.add_argument("--get", nargs=2, metavar=("filename", "project"), help="Gets a <filename> from a <project>")
   parser.add_argument("--config", nargs=1, metavar=("configfile"), help="Location of the Librarian config file")
   parser.add_argument("--lscreds", action="store_true", help="List all known credentials")
@@ -148,6 +174,8 @@ def main():
       projectLs()
     elif args.ls is not None:
       ls(args.ls[0])
+    elif args.create is not None:
+      create(args.create[0], args.create[1])
     elif args.put is not None and len(args.put) > 0:
       put(args.put[0], args.put[1], args.put[2])
     elif args.get is not None and len(args.get) > 0:
