@@ -16,6 +16,9 @@ setup(name="librarian",
       packages=["librarian"],
       install_requires=["boto", "MySQL-python"],
       #packages=["boto", "distutils"],
+      entry_points={
+          'console_scripts': ['librarian=librarian.librarian:main']
+      },
       )
 
 

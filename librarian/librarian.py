@@ -12,13 +12,13 @@ Freebase dumps.
 It should NOT be used to hold temporary or working files.
 """
 
-import argparse, boto, json, os.path
+import argparse, boto, json, os.path, dbconn
 
 ##
 # GLOBALS
 ##
 configFilename = os.path.abspath(os.path.expanduser("~/.librarian"))
-configDict = {"credentials":[]}
+configDict = {"credentials":{}}
 
 ###############################################
 class ConfigError(Exception):
@@ -26,13 +26,6 @@ class ConfigError(Exception):
   def __init__(self, msg):
     self.msg = msg
 
-
-class AWSInfo:
-  """AWSInfo is a simple container class for a named AWS key pair"""
-  def __init__(self, credentialsName, awsKeyId, awsSecretKey):
-    self.credentialsName = credentialsName
-    self.awsKeyId = awsKeyId
-    self.awsSecretKey = awsSecretKey
 
 ##################################################
 
@@ -65,11 +58,11 @@ def configInit():
   saveConfig()
 
 
-def addCredentials(credentialName, awsKeyId, awsSecretKey):
-  """Add a new credential triple to the config file for later use"""
+def addCredentials(credentialName, **credential):
+  """Add a new credential to the config file for later use"""
   loadConfig()
   global configDict
-  configDict["credentials"].append((credentialName, awsKeyId, awsSecretKey))
+  configDict["credentials"][credentialName] = credential
   saveConfig()
 
 
@@ -81,6 +74,9 @@ def checkS3():
 def checkMetadata():
   """Ensure we have valid access to the Librarian metadata."""
   loadConfig()
+  global dbconn
+  c = configDict["credentials"]["mysql"]
+  dbconn = dbconn.DBConn(c["user"], c["password"], c["host"], c["port"])
 
 
 def put(fname, project, comment):
@@ -96,21 +92,25 @@ def get(fname, project):
 
 
 def projectLs():
-  """List all Librarian files for a single project"""
+  """List all Librarian projects"""
   checkMetadata()  
-  print "List all projects"
+  print "List of all known projects:"
+  for name in dbconn.projectLs():
+    print name
 
 
 def ls(projectname):
-  """List all Librarian projects"""
+  """List all Librarian files for a single project"""
   checkMetadata()  
-  print "List all files in a project called", projectname
+  print "List of all datasets in a project named", projectname
+  for name, version, urls in dbconn.ls(projectname):
+    print name, version, urls
 
 
 #
 # main()
 #
-if __name__ == "__main__":
+def main():
   usage = "usage: %prog [options]"
 
   # Setup cmdline parsing
@@ -119,7 +119,8 @@ if __name__ == "__main__":
   parser.add_argument("--get", nargs=2, metavar=("filename", "project"), help="Gets a <filename> from a <project>")
   parser.add_argument("--config", nargs=1, metavar=("configfile"), help="Location of the Librarian config file")
   parser.add_argument("--lscreds", action="store_true", help="List all known credentials")
-  parser.add_argument("--addcred", nargs=3, metavar=("credential-name", "aws_access_key_id", "aws_secret_access_key"), help="Stores an AWS pair under name <credential-name>")
+  parser.add_argument("--set_aws_cred", nargs=2, metavar=("aws_access_key_id", "aws_secret_access_key"), help="Stores an AWS credential pair in the Librarian config file")
+  parser.add_argument("--set_mysql_cred", nargs=4, metavar=("mysql_host", "mysql_port", "mysql_user", "mysql_password"), help="Stores a MySQL connection info quadruple in the Librarian config file")
   parser.add_argument("--ls", nargs=1, metavar=("project"), help="List all the files in a <project>")
   parser.add_argument("--pls", action="store_true", default=False, help="List all projects")
   parser.add_argument("--init", action="store_true", default=False, help="Create the initial config file")  
@@ -133,12 +134,20 @@ if __name__ == "__main__":
       
     if args.init:
       configInit()
-    elif args.addcred is not None and len(args.addcred) == 3:
-      addCredentials(args.addcred[0], args.addcred[1], args.addcred[2])
+    elif args.set_aws_cred is not None and len(args.set_aws_cred) == 2:
+      addCredentials("aws", access_key_id=args.set_aws_cred[0]
+                          , secret_access_key=args.set_aws_cred[1]
+                          )
+    elif args.set_mysql_cred is not None and len(args.set_mysql_cred) == 4:
+      addCredentials("mysql", host=args.set_mysql_cred[0]
+                            , port=args.set_mysql_cred[1]
+                            , user=args.set_mysql_cred[2]
+                            , password=args.set_mysql_cred[3]
+                            )
     elif args.pls:
       projectLs()
     elif args.ls is not None:
-      ls(args.ls)
+      ls(args.ls[0])
     elif args.put is not None and len(args.put) > 0:
       put(args.put[0], args.put[1], args.put[2])
     elif args.get is not None and len(args.get) > 0:
@@ -146,9 +155,13 @@ if __name__ == "__main__":
     elif args.lscreds:
       loadConfig()
       print "There are", len(configDict["credentials"]), "credential(s) available"
-      for idx, awsCred in enumerate(configDict["credentials"]):
-        print " ", idx, awsCred[0]
+      for name, cred in configDict["credentials"].iteritems():
+        # TODO print prettier
+        print " ", name, cred
     else:
       parser.print_help()
   except ConfigError as e:
     print e.msg
+
+if __name__ == "__main__":
+  main()
