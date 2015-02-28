@@ -17,7 +17,7 @@ create table IncomingData
 ( id integer  primary key auto_increment
 , project integer not null
 , name text
-, version integer
+, version text
 , timestamp timestamp
 , urls text not null    -- list of urls delimited by new line character
 , checksums text        -- and corresponding MD5 checksums per line
